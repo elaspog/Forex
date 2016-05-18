@@ -1,6 +1,7 @@
 import os
 import re
 import pandas as pd
+import datetime as dt
 
 
 pattern_string = "Gap of (\d+)s found between (\d+) and (\d+)."
@@ -66,7 +67,30 @@ def readCandleAndGapDataFromCsvAndTxtFiles(dirpath):
     candle_data['datetime'] = candle_data['date'].str.replace('.', '') + candle_data['time'].str.replace(':', '') + "00"
     candle_data['is_gap'] = False
     
-    candle_data = flagCandleDataWithGaps(candle_data, gap_data)
-
     return (candle_data, gap_data)
         
+
+def parseDateTimeColumnForDataframe(dataframe, fromCol, toCol):
+    
+    if not fromCol in dataframe.columns:
+        raise Exception ( "Column " + fromCol + " is not in dataframe.")
+    l = None
+    if toCol == 'year':
+        l = lambda row: row[fromCol][0:4]
+    elif toCol == 'month':
+        l = lambda row: row[fromCol][4:6]
+    elif toCol == 'day':
+        l = lambda row: row[fromCol][6:8]
+    elif toCol == 'week':
+        l = lambda row: dt.datetime(int(row[fromCol][0:4]), int(row[fromCol][4:6]), int(row[fromCol][6:8])).isocalendar()[1]
+    elif toCol == 'dayOfWeek':
+        l = lambda row: dt.datetime(int(row[fromCol][0:4]), int(row[fromCol][4:6]), int(row[fromCol][6:8])).isocalendar()[2]
+    elif toCol == 'dayOfYear':
+        l = lambda row: dt.datetime(int(row[fromCol][0:4]), int(row[fromCol][4:6]), int(row[fromCol][6:8])).strftime("%j")
+    elif toCol == 'hour':
+        l = lambda row: row[fromCol][8:10]
+    elif toCol == 'minute':
+        l = lambda row: row[fromCol][10:12]
+    dataframe[toCol] = dataframe.apply(l, axis=1)
+
+
