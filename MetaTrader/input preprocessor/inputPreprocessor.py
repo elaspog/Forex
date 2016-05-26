@@ -1,9 +1,9 @@
 import os
 import re
 import pandas as pd
+import numpy as np
 import datetime as dt
 from intervaltree import IntervalTree
-
 
 
 pattern_string = "Gap of (\d+)s found between (\d+) and (\d+)."
@@ -83,5 +83,32 @@ def flagCandleDataWithGaps(candle_data, gap_data):
     col = (tree.overlaps(x) for x in candles['datetime_ts'])
     df = pd.DataFrame(col)
     candle_data['is_gap'] = df[0]
+
+
+
+def filterOutliers(candles):
+    c = candles
+    x_o1 = c[~(np.abs(c.open.astype(float)-c.open.astype(float).mean())<=(3*c.open.astype(float).std()))]
+    x_c1 = c[~(np.abs(c.close.astype(float)-c.close.astype(float).mean())<=(3*c.close.astype(float).std()))]
+    x_h1 = c[~(np.abs(c.high.astype(float)-c.high.astype(float).mean())<=(3*c.high.astype(float).std()))]
+    x_l1 = c[~(np.abs(c.low.astype(float)-c.low.astype(float).mean())<=(3*c.low.astype(float).std()))]
+    x_o2 = c[c.open.astype(float) <= 0.0]
+    x_c2 = c[c.close.astype(float) <= 0.0]
+    x_h2 = c[c.high.astype(float) <= 0.0]
+    x_l2 = c[c.low.astype(float) <= 0.0]
+    filtered = x_o1.append(x_o2)
+    filtered = filtered.append(x_c1).append(x_c2)
+    filtered = filtered.append(x_h1).append(x_h2)
+    filtered = filtered.append(x_l1).append(x_l2)
+    filtered = filtered.drop_duplicates()
+    valid = c[~c.isin(filtered)].dropna()
+    return valid.reset_index(drop=True), filtered, valid
+
+
+
+def filterCorruptedCandles(candles):
+    validCandles = candles[candles['is_gap'] == 'False']
+    validCandles.drop('is_gap', axis=1, inplace=True)
+    return validCandles.reset_index(drop=True)
 
 
