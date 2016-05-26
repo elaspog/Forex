@@ -2,9 +2,12 @@ import os
 import re
 import pandas as pd
 import datetime as dt
+from intervaltree import IntervalTree
+
 
 
 pattern_string = "Gap of (\d+)s found between (\d+) and (\d+)."
+
 
 
 def read_gaps_from_txt_files(path):
@@ -20,34 +23,6 @@ def read_gaps_from_txt_files(path):
     return ret_data
 
 
-'''    
-for index, row in gap_data.iterrows():
-    cond1 = candle_data['datetime'] >= row['from']
-    cond2 = candle_data['datetime'] <= row['to']
-    candle_data.ix[cond1 & cond2, 'is_gap'] = True
-    print index
-'''
-
-def flagCandleDataWithGaps(candle_data, gap_data):
-    c_i = 0
-    g_i = 0
-    c_len = len(candle_data)
-    g_len = len(gap_data)
-    while (c_i < c_len) & (g_i < g_len) :
-        if candle_data.ix[c_i,'datetime'] < gap_data.ix[g_i,'from']:
-            c_i = c_i + 1
-            continue
-        if candle_data.ix[c_i,'datetime'] > gap_data.ix[g_i,'to']:
-            g_i = g_i + 1
-            continue
-        if (candle_data.ix[c_i,'datetime'] >= gap_data.ix[g_i,'from']) & (candle_data.ix[c_i,'datetime'] <= gap_data.ix[g_i,'to']):
-            candle_data.ix[c_i,'is_gap'] = True
-            c_i = c_i + 1
-        else:
-            print('ERROR', candle_data.ix[c_i,'datetime'], gap_data.ix[g_i,'from'], gap_data.ix[g_i,'to'])
-        print str(c_i) + "/" + str(c_len) + "\t" + str(g_i) + "/" + str(g_len)
-    return candle_data
-
 
 def readCandleAndGapDataFromCsvAndTxtFiles(dirpath):
     dir_content = os.listdir(dirpath)
@@ -56,22 +31,24 @@ def readCandleAndGapDataFromCsvAndTxtFiles(dirpath):
     gap_data = pd.DataFrame()
     for filePair in sorted(list(set(files))):
         print(filePair)
-        
-        csv_data = pd.read_csv(dirpath+filePair+".csv", header=None)
+        csv_data = pd.read_csv(dirpath+filePair+".csv", header=None, dtype=str)
         candle_data = pd.concat([candle_data, csv_data], ignore_index=True)
-        
         text_data = read_gaps_from_txt_files(dirpath+filePair+".txt")
         gap_data = pd.concat([gap_data, text_data], ignore_index=True)
-    
     candle_data.columns=["date", "time", "open", "high", "low", "close", "volume"]    
     candle_data['datetime'] = candle_data['date'].str.replace('.', '') + candle_data['time'].str.replace(':', '') + "00"
-    candle_data['is_gap'] = False
-    
+    candle_data['is_gap'] = None
     return (candle_data, gap_data)
-        
+
+
+
+def cleanUnnecessaryColumns(candle_df):
+    candle_df.drop('date', axis=1, inplace=True)
+    candle_df.drop('time', axis=1, inplace=True)
+
+
 
 def parseDateTimeColumnForDataframe(dataframe, fromCol, toCol):
-    
     if not fromCol in dataframe.columns:
         raise Exception ( "Column " + fromCol + " is not in dataframe.")
     l = None
@@ -92,5 +69,19 @@ def parseDateTimeColumnForDataframe(dataframe, fromCol, toCol):
     elif toCol == 'minute':
         l = lambda row: row[fromCol][10:12]
     dataframe[toCol] = dataframe.apply(l, axis=1)
+
+
+
+def flagCandleDataWithGaps(candle_data, gap_data):
+    gaps = pd.DataFrame()
+    candles = pd.DataFrame()
+    gaps['from_ts'] = gap_data['from'].astype(float)
+    gaps['to_ts'] = gap_data['to'].astype(float)
+    gaps['to_ts'] = gaps['to_ts']+0.1
+    candles['datetime_ts'] = candle_data['datetime'].astype(float)
+    tree = IntervalTree.from_tuples(zip(gaps['from_ts'], gaps['to_ts']))
+    col = (tree.overlaps(x) for x in candles['datetime_ts'])
+    df = pd.DataFrame(col)
+    candle_data['is_gap'] = df[0]
 
 
