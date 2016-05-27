@@ -113,7 +113,7 @@ def filterCorruptedCandles(candles):
 
 
 
-def createContiguousPartitionsByTimeWithMinPartitionSize(candles, minPartitionSize = -1):
+def createContiguousPartitionsByTimeWithMinPartitionSize(candles, minPartitionSize = -1, processIndicatorStep = 1000):
     max_len = len(candles)
     l = list()
     dataFrameBuffer = None
@@ -139,7 +139,22 @@ def createContiguousPartitionsByTimeWithMinPartitionSize(candles, minPartitionSi
 
 
 
-def dataframeListCsvWriter(outDirPath, fileNamePrefix, listOfDataFrames, minPartitionSize = -1):
+def writeDataFrame(partitionDataFrame, outDirPath, fileNamePrefix, writeCandleCountToFileName):
+    fileName = fileNamePrefix
+    column = partitionDataFrame['datetime'].astype(long)
+    minVal = min(column)
+    maxVal = max(column)
+    fileName = fileName + "_" + str(minVal)
+    if writeCandleCountToFileName:
+        fileName = fileName + "_" + str(partitionDataFrame.shape[0])
+    if minVal != maxVal:
+        fileName = fileName + "_" + str(maxVal)
+    partitionDataFrame.to_csv(os.path.join(outDirPath, fileName+".csv"), index=False, sep=";")
+
+
+
+def dataframeListCsvWriter(outDirPath, fileNamePrefix, listOfDataFrames, minPartitionSize = -1,
+                           writeCandleCntToFileName = True):
     if not os.path.exists(outDirPath):
         os.makedirs(outDirPath)
     else:
@@ -147,30 +162,12 @@ def dataframeListCsvWriter(outDirPath, fileNamePrefix, listOfDataFrames, minPart
             raise Exception(outDirPath + " already exists, but it's not a directory.")
     for df in listOfDataFrames:
         if df.shape[0] >= minPartitionSize:
-            fileName = fileNamePrefix
-            column = df['datetime'].astype(long)
-            minVal = min(column)
-            maxVal = max(column)
-            fileName = fileName + "_" + str(minVal)
-            if minVal != maxVal:
-                fileName = fileName + "_" + str(maxVal)
-            df.to_csv(os.path.join(outDirPath, fileName+".csv"), index=False, sep=";")
+            writeDataFrame(df, outDirPath, fileNamePrefix, writeCandleCntToFileName)
 
 
 
-def writeDataFrame(partition, outDirPath, fileNamePrefix):
-    fileName = fileNamePrefix
-    column = partition['datetime'].astype(long)
-    minVal = min(column)
-    maxVal = max(column)
-    fileName = fileName + "_" + str(minVal)
-    if minVal != maxVal:
-        fileName = fileName + "_" + str(maxVal)
-    partition.to_csv(os.path.join(outDirPath, fileName+".csv"), index=False, sep=";")
-
-
-
-def partitionizeAndWriteCsvOnTheFly(outDirPath, fileNamePrefix, candles, minPartitionSize = -1):
+def partitionizeAndWriteCsvOnTheFly(outDirPath, fileNamePrefix, candles, minPartitionSize = -1,
+                                    writeCandleCntToFileName = True, processIndicatorStep = 1000):
     if not os.path.exists(outDirPath):
         os.makedirs(outDirPath)
     else:
@@ -190,12 +187,12 @@ def partitionizeAndWriteCsvOnTheFly(outDirPath, fileNamePrefix, candles, minPart
                 dataFrameBuffer = dataFrameBuffer.append(row, ignore_index=True)
             else:
                 if dataFrameBuffer.shape[0] >= minPartitionSize:
-                    writeDataFrame(dataFrameBuffer, outDirPath, fileNamePrefix)
+                    writeDataFrame(dataFrameBuffer, outDirPath, fileNamePrefix, writeCandleCntToFileName)
                 dataFrameBuffer = None
-        if index % 1000 == 0:
+        if index % processIndicatorStep == 0:
             print(str(index) + "/" + str(max_len))
     if dataFrameBuffer.shape[0] > minPartitionSize:
-        writeDataFrame(dataFrameBuffer, outDirPath, fileNamePrefix)
+        writeDataFrame(dataFrameBuffer, outDirPath, fileNamePrefix, writeCandleCntToFileName)
 
 
 
