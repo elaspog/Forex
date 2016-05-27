@@ -112,3 +112,48 @@ def filterCorruptedCandles(candles):
     return validCandles.reset_index(drop=True)
 
 
+
+def createContiguousPartitionsByTimeWithMinPartitionSize(candles, minPartitionSize = -1):
+    max_len = len(candles)
+    l = list()
+    dataFrameBuffer = None
+    for index, row in candles.iterrows():
+        if dataFrameBuffer is None:
+            dataFrameBuffer = pd.Series.to_frame(row).transpose()
+        else:
+            col = dataFrameBuffer['datetime'].astype(long)
+            df_max = max(col)
+            row_max = long(row['datetime'])
+            diff = abs(row_max-df_max)
+            if (diff <= 100):    # 100 equals to 60s in candle['datetime']
+                dataFrameBuffer = dataFrameBuffer.append(row, ignore_index=True)
+            else:
+                if dataFrameBuffer.shape[0] >= minPartitionSize:
+                    l.append(dataFrameBuffer)
+                dataFrameBuffer = None
+        if index % 1000 == 0:
+            print(str(index) + "/" + str(max_len))
+    if dataFrameBuffer.shape[0] > minPartitionSize:
+        l.append(dataFrameBuffer)
+    return l
+
+
+
+def dataframeListCsvWriter(outDirPath, fileNamePrefix, listOfDataFrames, minPartitionSize = -1):
+    if not os.path.exists(outDirPath):
+        os.makedirs(outDirPath)
+    else:
+        if not os.path.isdir(outDirPath):
+            raise Exception(outDirPath + " already exists, but it's not a directory.")
+    for df in listOfDataFrames:
+        if df.shape[0] >= minPartitionSize:
+            fileName = fileNamePrefix
+            column = df['datetime'].astype(long)
+            minVal = min(column)
+            maxVal = max(column)
+            fileName = fileName + "_" + str(minVal)
+            if minVal != maxVal:
+                fileName = fileName + "_" + str(maxVal)
+            df.to_csv(os.path.join(outDirPath, fileName+".csv"), index=False, sep=";")
+
+
