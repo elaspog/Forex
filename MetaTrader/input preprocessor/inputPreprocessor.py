@@ -83,12 +83,10 @@ def readCandleAndGapDataFromCsvAndTxtFiles(dirpath):
 
 
 def cleanUnnecessaryColumns(candle_df):
-    """ Drops unnecessary columns (time and date) of dataframe containing the raw candle.
+    """ Drops unnecessary columns in place (time and date) of dataframe containing the raw candle.
 
     Args:
         candle_df: dataframe of the candle history.
-    Returns:
-        the dataframe of the candle history.
     """
     candle_df.drop('date', axis=1, inplace=True)
     candle_df.drop('time', axis=1, inplace=True)
@@ -122,8 +120,6 @@ def parseDateTimeColumnForDataframe(dataframe, fromCol, toCol):
         dataframe: dataframe, what has a column with a defined 'datetime' format.
         fromCol: the name of the column what contains 'datetime' in format: YYYYMMDDhhmmss.
         toCol: the name of the new column being added to the dataframe.
-    Returns:
-        The modified version of the input dataframe.
     """
     if not fromCol in dataframe.columns:
         raise Exception ( "Column " + fromCol + " is not in dataframe.")
@@ -139,9 +135,9 @@ def parseDateTimeColumnForDataframe(dataframe, fromCol, toCol):
     elif toCol == 'minute':
         l = lambda row: row[fromCol][10:12]
     elif toCol == 'week':
-        l = lambda row: dt.datetime(int(row[fromCol][0:4]), int(row[fromCol][4:6]), int(row[fromCol][6:8])).isocalendar()[1]
+        l = lambda row: str(dt.datetime(int(row[fromCol][0:4]), int(row[fromCol][4:6]), int(row[fromCol][6:8])).isocalendar()[1])
     elif toCol == 'dayOfWeek':
-        l = lambda row: dt.datetime(int(row[fromCol][0:4]), int(row[fromCol][4:6]), int(row[fromCol][6:8])).isocalendar()[2]
+        l = lambda row: str(dt.datetime(int(row[fromCol][0:4]), int(row[fromCol][4:6]), int(row[fromCol][6:8])).isocalendar()[2])
     elif toCol == 'dayOfYear':
         l = lambda row: dt.datetime(int(row[fromCol][0:4]), int(row[fromCol][4:6]), int(row[fromCol][6:8])).strftime("%j")
     elif toCol == "nthDayOfWeekInMonth":
@@ -161,8 +157,6 @@ def flagCandleDataWithGaps(candle_data, gap_data):
         candle_data: dataframe of the candles, with 'datatime' column with format: YYYYMMDDhhmmss.
         gap_data: dataframe of the gaps, with 3 columns: interval_size, from_timestamp, to_timestamp
             where interval_size is given in sec, from_timestamp, to_timestamp has the YYYYMMDDhhmmss format.
-    Returns:
-        the candle dataframe with an indicator column.
     """
     gaps = pd.DataFrame()
     candles = pd.DataFrame()
@@ -216,9 +210,38 @@ def filterCorruptedCandles(candles):
     Returns:
         the filtered and reindexed dataset.
     """
-    validCandles = candles[candles['is_gap'] == 'False']
+    validCandles = candles[candles['is_gap'] == False]
     validCandles.drop('is_gap', axis=1, inplace=True)
     return validCandles.reset_index(drop=True)
+
+
+
+def saveToFile(dataframe, fileName, filePath = './'):
+    """ Saves the dataframe into a file
+
+    Args:
+        dataframe: dataframe to be saved
+        fileName: file name to be created
+        filePath: optional file path to the file name
+    """
+    if not os.path.exists(filePath) or not os.path.isdir(filePath):
+        raise Exception(filePath + " does not exist or not a directory.")
+    dataframe.to_csv(os.path.join(filePath, fileName), sep=";", index=False)
+
+
+
+def readFromFile(pathToFile):
+    """ Reads the file into a dataframe
+
+    Args:
+        pathToFile: file path to the CSV file
+    """
+    if not os.path.exists(pathToFile) or not os.path.isfile(pathToFile):
+        raise Exception(pathToFile + " does not exist or not a file.")
+    data = pd.read_csv(pathToFile, sep=';', index_col=False, dtype=str)
+    cols = data.columns[data.columns.str.contains('is_gap')]
+    data[cols] = data[cols].replace({'True': True, 'False': False})
+    return data
 
 
 
@@ -321,6 +344,8 @@ def partitionizeAndWriteCsvOnTheFly(outDirPath, fileNamePrefix, candles, minPart
         minPartitionSize: for checking partitions, only partitions with more candles than min value will be written.
         writeCandleCntToFileName: optional name paramter used by writeDataFrame(...).
         processIndicatorStep:  value for indication process (default value = 1000).
+    Depends on:
+        writeDataFrame(partitionDataFrame, outDirPath, fileNamePrefix, writeCandleCountToFileName).
     """
     if not os.path.exists(outDirPath):
         os.makedirs(outDirPath)
