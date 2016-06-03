@@ -21,7 +21,9 @@ import re
 import pandas as pd
 import numpy as np
 import datetime as dt
+import itertools
 from intervaltree import IntervalTree
+import shutil
 
 
 
@@ -107,6 +109,31 @@ def nthOccurenceOfADayOfTheWeekInMonth(day):
         actual_day = actual_day - 7
         counter = counter + 1
     return str(counter)
+
+
+
+def getDateTimeInfoFromDatetimeField(datetime, typeOfDateTimeInfo):
+    if typeOfDateTimeInfo == 'year':
+        return datetime[0:4]
+    elif typeOfDateTimeInfo == 'month':
+        return datetime[4:6]
+    elif typeOfDateTimeInfo == 'day':
+        return datetime[6:8]
+    elif typeOfDateTimeInfo == 'hour':
+        return datetime[8:10]
+    elif typeOfDateTimeInfo == 'minute':
+        return datetime[10:12]
+    elif typeOfDateTimeInfo == 'week':
+        return str(dt.datetime(int(datetime[0:4]), int(datetime[4:6]), int(datetime[6:8])).isocalendar()[1])
+    elif typeOfDateTimeInfo == 'dayOfWeek':
+        return str(dt.datetime(int(datetime[0:4]), int(datetime[4:6]), int(datetime[6:8])).isocalendar()[2])
+    elif typeOfDateTimeInfo == 'dayOfYear':
+        return dt.datetime(int(datetime[0:4]), int(datetime[4:6]), int(datetime[6:8])).strftime("%j")
+    elif typeOfDateTimeInfo == 'nthDayOfWeekInMonth':
+        day = datetime[6:8]
+        return nthOccurenceOfADayOfTheWeekInMonth(int(day))
+    else:
+        raise Exception("Unknown datatime type: ", typeOfDateTimeInfo)
 
 
 
@@ -245,8 +272,17 @@ def readFromFile(pathToFile):
 
 
 
-def createContiguousPartitionsByTimeWithMinPartitionSize(candles, minPartitionSize = -1, processIndicatorStep = 1000):
-    """ Makes partitions from the candle dataset according to the minimal partition size.
+def differenceOfDateTimesFieldsInSec(datetime1, datetime2):
+    dt1 = dt.datetime(int(datetime1[0:4]), int(datetime1[4:6]), int(datetime1[6:8]),
+                      int(datetime1[8:10]), int(datetime1[10:12]), int(datetime1[12:14]))
+    dt2 = dt.datetime(int(datetime2[0:4]), int(datetime2[4:6]), int(datetime2[6:8]),
+                      int(datetime2[8:10]), int(datetime2[10:12]), int(datetime2[12:14]))
+    return abs(dt1-dt2).total_seconds()
+
+
+
+def segmentationByTimeWithMinSegmentSize(candles, minPartitionSize = -1, processIndicatorStep = 1000):
+    """ Makes segments from the candle dataset according to the minimal partition size.
 
     Args:
         candles: dataframe of unpartitioned dataset.
@@ -262,17 +298,16 @@ def createContiguousPartitionsByTimeWithMinPartitionSize(candles, minPartitionSi
         if dataFrameBuffer is None:
             dataFrameBuffer = pd.Series.to_frame(row).transpose()
         else:
-            col = dataFrameBuffer['datetime'].astype(long)
-            df_max = max(col)
-            row_max = long(row['datetime'])
-            diff = abs(row_max-df_max)
-            if (diff <= 100):    # 100 equals to 60s in candle['datetime']
+            df_max = str(max(dataFrameBuffer['datetime'].astype(long)))
+            row_max = str(long(row['datetime']))
+            diff = differenceOfDateTimesFieldsInSec(row_max, df_max)
+            if (diff <= 60):
                 dataFrameBuffer = dataFrameBuffer.append(row, ignore_index=True)
             else:
                 if dataFrameBuffer.shape[0] >= minPartitionSize:
                     l.append(dataFrameBuffer)
                 dataFrameBuffer = None
-        if index % 1000 == 0:
+        if index % processIndicatorStep == 0:
             print(str(index) + "/" + str(max_len))
     if dataFrameBuffer.shape[0] > minPartitionSize:
         l.append(dataFrameBuffer)
@@ -301,7 +336,17 @@ def writeDataFrame(partitionDataFrame, outDirPath, fileNamePrefix, writeCandleCo
         fileName = fileName + "_" + str(partitionDataFrame.shape[0])
     if minVal != maxVal:
         fileName = fileName + "_" + str(maxVal)
-    partitionDataFrame.to_csv(os.path.join(outDirPath, fileName+".csv"), index=False, sep=";")
+    saveToFile(partitionDataFrame, fileName+".csv", outDirPath)
+#    partitionDataFrame.to_csv(os.path.join(outDirPath, fileName+".csv"), index=False, sep=";")
+
+
+
+def directoryCheck(outDirPath):
+    if not os.path.exists(outDirPath):
+        os.makedirs(outDirPath)
+    else:
+        if not os.path.isdir(outDirPath):
+            raise Exception(outDirPath + " already exists, but it's not a directory.")
 
 
 
@@ -318,20 +363,16 @@ def dataframeListCsvWriter(outDirPath, fileNamePrefix, listOfDataFrames, minPart
     Depends on:
         writeDataFrame(partitionDataFrame, outDirPath, fileNamePrefix, writeCandleCountToFileName).
     """
-    if not os.path.exists(outDirPath):
-        os.makedirs(outDirPath)
-    else:
-        if not os.path.isdir(outDirPath):
-            raise Exception(outDirPath + " already exists, but it's not a directory.")
+    directoryCheck(outDirPath)
     for df in listOfDataFrames:
         if df.shape[0] >= minPartitionSize:
             writeDataFrame(df, outDirPath, fileNamePrefix, writeCandleCntToFileName)
 
 
 
-def partitionizeAndWriteCsvOnTheFly(outDirPath, fileNamePrefix, candles, minPartitionSize = -1,
+def segmentationByTimeWithMinSegmentSizeAndWriteCsvOnTheFly(outDirPath, fileNamePrefix, candles, minPartitionSize = -1,
                                     writeCandleCntToFileName = True, processIndicatorStep = 1000):
-    """ Makes partitions from candle dataset and writes them to the disk.
+    """ Makes segments from candle dataset and writes them to the disk.
 
     Does not require a list of dataframes stored in the memory.
     It iterates over the dataframe, searches for contiguous partitions larger than the minimal size,
@@ -347,22 +388,17 @@ def partitionizeAndWriteCsvOnTheFly(outDirPath, fileNamePrefix, candles, minPart
     Depends on:
         writeDataFrame(partitionDataFrame, outDirPath, fileNamePrefix, writeCandleCountToFileName).
     """
-    if not os.path.exists(outDirPath):
-        os.makedirs(outDirPath)
-    else:
-        if not os.path.isdir(outDirPath):
-            raise Exception(outDirPath + " already exists, but it's not a directory.")
+    directoryCheck(outDirPath)
     max_len = len(candles)
     dataFrameBuffer = None
     for index, row in candles.iterrows():
         if dataFrameBuffer is None:
             dataFrameBuffer = pd.Series.to_frame(row).transpose()
         else:
-            col = dataFrameBuffer['datetime'].astype(long)
-            df_max = max(col)
-            row_max = long(row['datetime'])
-            diff = abs(row_max-df_max)
-            if (diff <= 100):    # 100 equals to 60s in candle['datetime']
+            df_max = str(max(dataFrameBuffer['datetime'].astype(long)))
+            row_max = str(long(row['datetime']))
+            diff = differenceOfDateTimesFieldsInSec(row_max, df_max)
+            if (diff <= 60):
                 dataFrameBuffer = dataFrameBuffer.append(row, ignore_index=True)
             else:
                 if dataFrameBuffer.shape[0] >= minPartitionSize:
@@ -372,6 +408,193 @@ def partitionizeAndWriteCsvOnTheFly(outDirPath, fileNamePrefix, candles, minPart
             print(str(index) + "/" + str(max_len))
     if dataFrameBuffer.shape[0] > minPartitionSize:
         writeDataFrame(dataFrameBuffer, outDirPath, fileNamePrefix, writeCandleCntToFileName)
+
+
+
+def _getDirName(groupingList, dateTime):
+    dirName = ""
+    for group in groupingList:
+        if dirName:
+            dirName = dirName + "_" +getDateTimeInfoFromDatetimeField(dateTime, group)
+        else:
+            dirName = dirName + getDateTimeInfoFromDatetimeField(dateTime, group)
+    return dirName
+
+
+
+def _groupCsvFile(csvFile, inputDirPath, outDirPath, groupingList, copyInsteadOfMove, patternOfDatetimes, onConflictPutIntoFirst):
+    datetimes = re.findall(r'\d{14}', csvFile)
+    fromDirName = _getDirName(groupingList, datetimes[0])
+    toDirName = None
+    if len(datetimes) > 1:
+        toDirName = _getDirName(groupingList, datetimes[1])
+    wasDifference = False
+    if toDirName and fromDirName != toDirName:
+        wasDifference = True
+        print("interesting: " + csvFile + "\n\tfromDirName:" + fromDirName + "\ttoDirName:" + toDirName)
+    outputDir = None
+    if not onConflictPutIntoFirst and wasDifference:
+        outputDir = toDirName
+    else:
+        outputDir = fromDirName
+    inFile = os.path.join(inputDirPath, csvFile)
+    outDir = os.path.join(outDirPath, outputDir)
+    directoryCheck(outDir)
+    outFile = os.path.join(outDir, csvFile)
+    if copyInsteadOfMove:
+        shutil.copyfile(inFile, outFile)
+    else:
+        shutil.move(inFile, outFile)
+
+
+
+def groupFilesBy(inputDirPath, outDirPath, groupingList, copyInsteadOfMove = True, patternOfDatetimes=r'\d{14}', onConflictPutIntoFirst=True):
+    directoryCheck(outDirPath)
+    if (groupingList == []):
+        raise Exception("No grouping criteria defined as groupingList parameter.")
+    csvFiles = ( fi for fi in os.listdir(inputDirPath) if fi.endswith(".csv") )
+    map(lambda x: _groupCsvFile(x, inputDirPath, outDirPath, groupingList, copyInsteadOfMove, patternOfDatetimes, onConflictPutIntoFirst), csvFiles)
+
+
+
+def labelsOfMultiplicatedColumnNames(inputDataframe, multiplicationFactor):
+    """ Generates labels for dataframes contaning partitions in their records
+
+    Args:
+        inputDataFrame: the original dataframe, which columns are being multiplicated
+        multiplicationFactor: number of multiplication
+    Returns:
+        list of string labels
+    """
+    labels = []
+    l = []
+    l.append(range(1, multiplicationFactor+1))
+    l.append(inputDataframe.columns.values.tolist())
+    for element in itertools.product(*l):
+        labels.append('_'.join(map(str,element[::-1])))
+    return labels
+
+
+
+def transformAndCollect(dataFrameBuffer, partitionSize):
+    """ Transforms the buffered candle partitions dataframe into records of partitions by using sliding window.
+
+    Iterates over the segment by using sliding windows and creates fix sized partitions.
+    The size of the candle partitions are always less or equal to the size of the candle segment.
+
+    Args:
+        dataFrameBuffer: container of candle segments.
+        partitionSize: size of partitions.
+    Return:
+        the all possible fix sized partitions from a segment.
+    """
+    outBuffer = pd.DataFrame()
+    rowCount = dataFrameBuffer.shape[0]
+    if(partitionSize <= 0):
+        raise Exception("partitionSize is less or equal than 0")
+    if(rowCount < partitionSize):
+        raise Exception("rowCount is smaller than partitionSize")
+
+    for i in range(0, rowCount - partitionSize + 1):
+        slidingWindowOnPartition = dataFrameBuffer[i : i+partitionSize]
+        fx = pd.DataFrame(pd.DataFrame(slidingWindowOnPartition).values.reshape(1,-1))
+        outBuffer = outBuffer.append(fx)
+    return outBuffer
+
+
+
+def searchPartitionTransformToFixedSizeCollectAndWriteCsv(outDirPath, fileName, candles, partitionSize = 1,
+                                                          processIndicatorStep = 1000):
+    """ Creates partitions from candle dataset and writes them to the disk.
+
+    It iterates over the dataframe, searches for contiguous partitions larger than the minimal size,
+    creates dataframes on the fly and writes them to disk.
+
+    Args:
+        outDirPath: path of the output directory.
+        fileName: file name prefix used by writeDataFrame(...).
+        candles: dataframe of non corrupted candles with 'datetime' field.
+        partitionSize: for reducing the segments, only partitions with the same count of candles will be written.
+        processIndicatorStep:  value for indication process (default value = 1000).
+    Depends on:
+        labelsOfMultiplicatedColumnNames(inputDataframe, multiplicationFactor).
+        transformAndCollect(dataFrameBuffer, partitionSize).
+        writeDataFrame(partitionDataFrame, outDirPath, fileNamePrefix, writeCandleCountToFileName).
+    """
+    if(partitionSize < 0):
+        raise Exception("partitionSize parameter cannot be less or equal than 0")
+    directoryCheck(outDirPath)
+    outBuffer = pd.DataFrame()
+    max_len = len(candles)
+    dataFrameBuffer = None
+    for index, row in candles.iterrows():
+        if dataFrameBuffer is None:
+            dataFrameBuffer = pd.Series.to_frame(row).transpose()
+        else:
+            df_max = str(max(dataFrameBuffer['datetime'].astype(long)))
+            row_max = str(long(row['datetime']))
+            diff = differenceOfDateTimesFieldsInSec(row_max, df_max)
+            if (diff <= 60):
+                dataFrameBuffer = dataFrameBuffer.append(row, ignore_index=True)
+            else:
+                if dataFrameBuffer.shape[0] >= partitionSize:
+                    outBuffer = outBuffer.append(transformAndCollect(dataFrameBuffer, partitionSize))
+                dataFrameBuffer = None
+        if index % processIndicatorStep == 0:
+            print(str(index) + "/" + str(max_len))
+    if dataFrameBuffer.shape[0] > partitionSize:
+        outBuffer = outBuffer.append(transformAndCollect(dataFrameBuffer, partitionSize))
+    outBuffer.columns = labelsOfMultiplicatedColumnNames(candles, partitionSize)
+    outBuffer = outBuffer.reset_index(drop=True)
+    outBuffer.to_csv(os.path.join(outDirPath, fileName), index=False, sep=";")
+    return outBuffer
+
+
+
+def readSegmentsFromFilesTransformToFixedSizePartitionsAndWriteCsvs(outDirPath, inDirPathList, partitionSize,
+                                                                        processIndicatorStep = 1000):
+    if(partitionSize < 0):
+        raise Exception("partitionSize parameter cannot be less or equal than 0")
+    #for dirItem in os.listdir(inDirPathList):
+    #    directoryCheck(dirItem)
+    directoryCheck(outDirPath)
+    dirCounter = 0
+    containerDirContent = os.listdir(inDirPathList)
+    for dirItem in containerDirContent:
+        dirItemPath = os.path.join(inDirPathList, dirItem)
+        dirCounter = dirCounter + 1
+        dirContent = os.listdir(dirItemPath)
+        outBuffer = pd.DataFrame()
+        dir_size = len(dirContent)
+        fileCounter = 0
+        print(dirItem)
+        for fileName in dirContent:
+            fileCounter = fileCounter + 1
+            dataFrameBuffer = None
+            df = readFromFile(os.path.join(dirItemPath, fileName))
+            for index, row in df.iterrows():
+                if dataFrameBuffer is None:
+                    dataFrameBuffer = pd.Series.to_frame(row).transpose()
+                else:
+                    df_max = str(max(dataFrameBuffer['datetime'].astype(long)))
+                    row_max = str(long(row['datetime']))
+                    diff = differenceOfDateTimesFieldsInSec(row_max, df_max)
+                    if (diff <= 60):
+                        dataFrameBuffer = dataFrameBuffer.append(row, ignore_index=True)
+                    else:
+                        if dataFrameBuffer.shape[0] >= partitionSize:
+                            outBuffer = outBuffer.append(transformAndCollect(dataFrameBuffer, partitionSize))
+                        dataFrameBuffer = None
+                if index % processIndicatorStep == 0:
+                    print("file     : "+ str(fileCounter) + "/" + str(dir_size) + "\t\tdirectory: "+ str(dirCounter) + "/" + str(len(containerDirContent)))
+            if dataFrameBuffer.shape[0] > partitionSize:
+                outBuffer = outBuffer.append(transformAndCollect(dataFrameBuffer, partitionSize))
+        outPath = os.path.join(outDirPath, dirItem +'.csv')
+        if outBuffer.shape[0] >= partitionSize:
+            outBuffer.columns = labelsOfMultiplicatedColumnNames(df, partitionSize)
+            outBuffer = outBuffer.reset_index(drop=True)
+            outBuffer.to_csv(outPath, index=False, sep=";")
+        print(outPath)
 
 
 
